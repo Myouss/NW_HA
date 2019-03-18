@@ -1,0 +1,89 @@
+#!/bin/bash
+# ---------------------------------------------------------------------
+# Copyright 2016 Google Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ---------------------------------------------------------------------
+
+: ${OCF_FUNCTIONS_DIR=${OCF_ROOT}/lib/heartbeat}
+. ${OCF_FUNCTIONS_DIR}/ocf-shellfuncs
+
+MYZONE=$(curl -sH'Metadata-Flavor: Google' "http://metadata.google.internal/computeMetadata/v1/instance/zone" | cut -d'/' -f4)
+
+meta_data() {
+  cat <<EOF
+<?xml version="1.0"?>
+<!DOCTYPE resource-agent SYSTEM "ra-api-1.dtd">
+<resource-agent name="gcp:vip">
+  <version>1.0</version>
+  <longdesc lang="en">Long</longdesc>
+  <shortdesc lang="en">Short</shortdesc>
+  <parameters>
+    <parameter name="route_name" unique="1" required="1">
+    <longdesc lang="en">The name of the GCP route.</longdesc>
+    <shortdesc lang="en">Route name</shortdesc>
+    <content type="string" default="" />
+    </parameter>
+    <parameter name="route_network" unique="1" required="1">
+    <longdesc lang="en">GCP network in which the route should be created.</longdesc>
+    <shortdesc lang="en">Network name</shortdesc>
+    <content type="string" default="" />
+    </parameter>
+    <parameter name="route_ip" unique="1" required="1">
+    <longdesc lang="en">IP Address to be routed through.</longdesc>
+    <shortdesc lang="en">IP Address</shortdesc>
+    <content type="string" default="" />
+    </parameter>
+  </parameters>
+  <actions>
+    <action name="start" timeout="20" />
+    <action name="stop" timeout="20" />
+    <action name="monitor" timeout="20" interval="10" depth="0" />
+    <action name="meta-data" timeout="5" />
+  </actions>
+</resource-agent>
+EOF
+}
+
+case ${1} in
+  start)
+    gcloud compute routes delete ${OCF_RESKEY_route_name} --verbosity=none -q
+    gcloud compute routes create ${OCF_RESKEY_route_name} --priority=1000 --network=${OCF_RESKEY_route_network} --destination-range=${OCF_RESKEY_route_ip}/32 --next-hop-instance=${HOSTNAME} --next-hop-instance-zone=${MYZONE} -q
+    exit 0
+	;;
+	stop)
+		exit 0
+	;;
+	status)
+    if [ "$(gcloud compute routes describe ${OCF_RESKEY_route_name} --verbosity=none -q | grep nextHop | grep -o '[^/]*$')" = "${HOSTNAME}" ]; then
+      echo "I have the virtual IP"
+      exit 0
+    else
+      echo "I do not have the virtual IP"
+      exit 1
+    fi
+	;;
+	monitor)
+    if [ "$(gcloud compute routes describe ${OCF_RESKEY_route_name} --verbosity=none -q | grep nextHop | grep -o '[^/]*$')" = "${HOSTNAME}" ]; then
+      exit 0
+    else
+      exit 7
+    fi
+  ;;
+  meta-data)
+    meta_data
+  ;;
+  *)
+    echo "no such function \"${1}\""
+    exit $OCF_ERR_UNIMPLEMENTED
+	;;
+esac
